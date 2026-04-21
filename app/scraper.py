@@ -1,11 +1,11 @@
 import requests
-from config.settings import IDX_API_URL, REQUEST_TIMEOUT
+from config.settings import REQUEST_TIMEOUT
 
 QUARTER_MAP = {
-    "Q1": "1",
-    "Q2": "2",
-    "Q3": "3",
-    "Q4": "4",
+    "Q1": "TW1",
+    "Q2": "TW2",
+    "Q3": "TW3",
+    "Q4": "TW4",
 }
 
 HEADERS = {
@@ -19,8 +19,8 @@ HEADERS = {
     "Referer": "https://www.idx.co.id/",
 }
 
-
 def _get(url: str, params: dict) -> dict:
+    """Helper function to make GET requests to IDX API"""
     try:
         response = requests.get(
             url, params=params, headers=HEADERS, timeout=REQUEST_TIMEOUT
@@ -34,83 +34,81 @@ def _get(url: str, params: dict) -> dict:
     except requests.RequestException as exc:
         raise RuntimeError(f"Request to IDX API failed: {exc}") from exc
 
-
-def get_company_profile(symbol: str) -> dict:
-    url = f"{IDX_API_URL}/GetCompanyProfile"
-    data = _get(url, {"indexCode": symbol.upper()})
-    if not data:
-        return {}
-    item = data[0] if isinstance(data, list) else data
-    return {
-        "name": item.get("companyName", ""),
-        "sector": item.get("sector", ""),
-        "sub_sector": item.get("subSector", ""),
-        "listing_date": item.get("listingDate", ""),
-        "shares_outstanding": item.get("sharesOutstanding", None),
+def get_financial_report(symbol: str, year: int, quarter: str) -> dict:
+    """
+    Get financial report from IDX API
+    
+    Args:
+        symbol: Stock code (e.g., 'BBRI', 'ASII')
+        year: Year of report (e.g., 2024)
+        quarter: Quarter (Q1, Q2, Q3, Q4)
+    
+    Returns:
+        dict: Financial report data
+    """
+    periode = QUARTER_MAP.get(quarter.upper(), "TW1")
+    
+    url = "https://www.idx.co.id/primary/ListedCompany/GetFinancialReport"
+    
+    params = {
+        "ReportType": None,
+        "KodeEmiten": symbol.upper(),
+        "Year": year,
+        "SortColumn": "KodeEmiten",
+        "SortOrder": "asc",
+        "EmitenType": None,
+        "Periode": periode,
+        "indexfrom": 0,
+        "pagesize": 100,
     }
+    
+    try:
+        response_data = _get(url, params)
+        
+        if response_data.get("ResultCount", 0) > 0 and response_data.get("Results"):
+            return response_data["Results"][0]
+        else:
+            raise RuntimeError(f"No financial data found for {symbol} - {year} {periode}")
+            
+    except Exception as exc:
+        raise RuntimeError(f"Failed to fetch financial report: {exc}") from exc
 
-
-def get_financial_statements(symbol: str, year: int, quarter: str) -> dict:
-    quarter_num = QUARTER_MAP.get(quarter.upper(), quarter)
-    url = f"{IDX_API_URL}/GetFinancialStatements"
-    data = _get(
-        url,
-        {
-            "indexCode": symbol.upper(),
-            "year": str(year),
-            "quarter": quarter_num,
-        },
-    )
-    if not data:
-        return {}
-    item = data[0] if isinstance(data, list) else data
+def parse_financial_data(raw_data: dict) -> dict:
+    """Parse raw IDX API response into standardized format"""
     return {
-        "revenue": item.get("revenue", None),
-        "gross_profit": item.get("grossProfit", None),
-        "operating_profit": item.get("operatingProfit", None),
-        "net_profit": item.get("netProfit", None),
-        "total_assets": item.get("totalAssets", None),
-        "total_liabilities": item.get("totalLiabilities", None),
-        "total_equity": item.get("totalEquity", None),
-        "eps": item.get("eps", None),
-        "book_value_per_share": item.get("bookValuePerShare", None),
+        "kode_emiten": raw_data.get("KodeEmiten"),
+        "nama_emiten": raw_data.get("NamaEmiten"),
+        "periode_laporan": raw_data.get("PeriodeLaporan"),
+        "tanggal_laporan": raw_data.get("TanggalLaporan"),
+        "revenue": raw_data.get("Revenue"),
+        "cost_of_goods_sold": raw_data.get("CostOfGoodsSold"),
+        "gross_profit": raw_data.get("GrossProfit"),
+        "operating_expense": raw_data.get("OperatingExpense"),
+        "operating_profit": raw_data.get("OperatingProfit"),
+        "net_profit": raw_data.get("NetProfit"),
+        "total_assets": raw_data.get("TotalAssets"),
+        "total_liabilities": raw_data.get("TotalLiabilities"),
+        "total_equity": raw_data.get("TotalEquity"),
+        "eps": raw_data.get("EPS"),
+        "book_value_per_share": raw_data.get("BookValuePerShare"),
+        "roe": raw_data.get("ROE"),
+        "roa": raw_data.get("ROA"),
+        "npm": raw_data.get("NPM"),
+        "der": raw_data.get("DER"),
+        "per": raw_data.get("PER"),
+        "pbr": raw_data.get("PBR"),
+        "current_ratio": raw_data.get("CurrentRatio"),
     }
-
-
-def get_key_ratios(symbol: str, year: int, quarter: str) -> dict:
-    quarter_num = QUARTER_MAP.get(quarter.upper(), quarter)
-    url = f"{IDX_API_URL}/GetKeyRatios"
-    data = _get(
-        url,
-        {
-            "indexCode": symbol.upper(),
-            "year": str(year),
-            "quarter": quarter_num,
-        },
-    )
-    if not data:
-        return {}
-    item = data[0] if isinstance(data, list) else data
-    return {
-        "roe": item.get("roe", None),
-        "roa": item.get("roa", None),
-        "npm": item.get("npm", None),
-        "der": item.get("der", None),
-        "per": item.get("per", None),
-        "pbr": item.get("pbr", None),
-        "current_ratio": item.get("currentRatio", None),
-    }
-
 
 def scrape_fundamental(symbol: str, year: int, quarter: str) -> dict:
-    profile = get_company_profile(symbol)
-    financials = get_financial_statements(symbol, year, quarter)
-    ratios = get_key_ratios(symbol, year, quarter)
+    """Main function to scrape fundamental data from IDX"""
+    raw_data = get_financial_report(symbol, year, quarter)
+    parsed_data = parse_financial_data(raw_data)
+    
     return {
         "symbol": symbol.upper(),
         "year": year,
         "quarter": quarter.upper(),
-        "profile": profile,
-        "financials": financials,
-        "ratios": ratios,
+        "data": parsed_data,
+        "raw_response": raw_data,
     }
